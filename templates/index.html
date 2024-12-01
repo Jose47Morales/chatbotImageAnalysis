@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analisis de imagenes con Chatbot</title>
+    <link rel="stylesheet" href="../static/css/styles.css">
+</head>
+
+<body>
+    <h1>Sube una Imagen para Analizar Colores</h1>
+    <form id="upload-form" enctype="multipart/form-data">
+        <input type="file" name="image" accept="image/*" required>
+        <button type="submit">Analizar</button>
+    </form>
+    <canvas id="uploaded-image" width="400" height="300"
+        style="display: none; margin-top: 1rem; border: 1px solid #ccc;"></canvas>
+    <div id="result"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.getElementById('upload-form');
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('uploaded-image');
+            const ctx = canvas.getContext('2d');
+
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+
+                const fileInput = form.querySelector('input[type="file"]');
+                const file = fileInput.files[0];
+                if (!file) {
+                    alert('Por favor, selecciona una imagen.');
+                    return
+                }
+
+                // Mostramos la vista previa de la imagen
+                const img = new Image();
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    img.onload = () => {
+                        // Ajustamos el tamaño dependiendo la imagen
+                        const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
+                        const width = img.width * scale;
+                        const height = img.height * scale;
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0, width, height);
+                        canvas.style.display = 'block';
+                    };
+                    img.src = e.target.result;
+                };
+
+                reader.readAsDataURL(file);
+
+                const formData = new FormData(form);
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.error) {
+                    resultDiv.textContent = 'Error: ${data.error}';
+                } else {
+                    resultDiv.innerHTML = `<h3>Colores Dominantes:</h3>`;
+                    data.colors.forEach(color => {
+                        const colorContainer = document.createElement('div');
+                        colorContainer.classList.add('color-container');
+
+                        const colorCircle = document.createElement('div');
+                        colorCircle.classList.add('color-circle');
+                        colorCircle.style.backgroundColor = color;
+
+                        const colorHex = document.createElement('span');
+                        colorHex.classList.add('color-hex');
+                        colorHex.textContent = color;
+
+                        colorContainer.appendChild(colorCircle);
+                        colorContainer.appendChild(colorHex);
+                        resultDiv.appendChild(colorContainer)
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
