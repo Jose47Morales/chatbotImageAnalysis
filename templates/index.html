@@ -11,13 +11,22 @@
 <body>
     <h1>Sube una Imagen para Analizar Colores</h1>
     <form id="upload-form" enctype="multipart/form-data">
-        <input type="file" name="image" accept="image/*" required>
+        <input type="file" name="image" accept="image/*">
         <button type="submit">Analizar</button>
     </form>
     <canvas id="uploaded-image" width="400" height="300"
         style="display: none; margin-top: 1rem; border: 1px solid #ccc;"></canvas>
     <div id="result"></div>
-
+    <div id="chatbot">
+        <h2>Chatea con Atom!</h2>
+        <div id="chat-window">
+            <div id="messages"></div>
+        </div>
+        <form id="chat-form" autocomplete="off">
+            <input type="text" id="chat-input" placeholder="Escribe tu mensaje..." required>
+            <button type="submit">Enviar</button>
+        </form>
+    </div>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const form = document.getElementById('upload-form');
@@ -86,6 +95,50 @@
                     });
                 }
             });
+
+            const chatForm = document.getElementById('chat-form');
+            const chatInput = document.getElementById('chat-input');
+            const messages = document.getElementById('messages');
+
+            chatForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+
+                // Obtenemos el mensaje del usuario
+                const userMessage = chatInput.value.trim();
+                if (!userMessage) return;
+
+                // Mostramos el mensaje
+                addMessage(userMessage, 'user');
+                chatInput.value = '';
+
+                // Enviamos el mensaje al server
+                try {
+                    const response = await fetch('/chatbot', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({message: userMessage})
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Error en la respuesta del servidor');
+                    }
+
+                    const data = await response.json();
+                    const botMessage = data.reply || 'Lo siento, no entiendo la pregrunta.';
+                    addMessage(botMessage, 'bot');
+                } catch (error) {
+                    console.error(error);
+                    addMessage('Error al conectar con el chatbot. Inténtalo más tarde.', 'bot');
+                }
+            });
+
+            function addMessage(text, sender) {
+                const message = document.createElement('div');
+                message.classList.add('message', sender);
+                message.textContent = text;
+                messages.appendChild(message);
+                messages.scrollTop = messages.scrollHeight;
+            }
         });
     </script>
 </body>
