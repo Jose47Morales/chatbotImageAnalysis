@@ -1,234 +1,95 @@
-# Chatbot de analisis y combinación de colores
+# Chatbot de análisis y combinación de colores
 
 ![image](https://github.com/user-attachments/assets/f700bb94-bb64-4299-9c46-486efc891410)
 
-## Objetivo del proyecto
-El programa es una aplicación Flask que permite:
-1. Subir una imagen y extraer sus colores dominantes mediante clustering (K-Means).
-2. Interactuar con un chatbot configurado como diseñador gráfico que responde preguntas relacionadas con los colores extraídos.
+Aplicación web en Flask que extrae los colores dominantes de una imagen con K-Means y permite conversar con un chatbot, configurado como diseñador gráfico, sobre cómo usar y combinar esos colores. Proyecto del diplomado de Machine Learning.
 
----
+El clustering de colores es implementación propia (OpenCV + scikit-learn). El chatbot no es un modelo entrenado por mí: consume GPT-4 a través de la API de OpenAI, orquestado con LangChain.
 
-## Secciones del Código
+## Tecnologías
 
-### 1. **Configuración Inicial**
+- **Backend:** Python, Flask
+- **Procesamiento de imágenes:** OpenCV, Pillow
+- **Clustering:** scikit-learn (K-Means)
+- **Chatbot:** LangChain, FAISS, API de OpenAI (GPT-4)
+- **Frontend:** HTML y CSS (plantilla Jinja2)
 
-#### Importación de librerías
-```python
-from flask import Flask, request, render_template, jsonify
-import os
-from werkzeug.utils import secure_filename 
-from PIL import Image
-import cv2
-import numpy as np
-import openai
-from dotenv import load_dotenv
-from langchain.chains import ConversationalRetrievalChain
-from langchain_openai import ChatOpenAI
-from langchain_community.vectorstores import FAISS
+## Cómo ejecutarlo
+
+**Requisitos:** Python 3.12 (probado con esta versión) y, solo para el chatbot, una clave de la API de OpenAI.
+
+1. Clona el repositorio y entra en la carpeta:
+```bash
+git clone https://github.com/Jose47Morales/chatbotImageAnalysis.git
+cd chatbotImageAnalysis
+```
+2. Crea y activa un entorno virtual:
+```bash
+python -m venv venv
+source venv/Scripts/activate # Git Bash en Windows
+```
+PowerShell: venv\Scripts\Activate.ps1
+
+macOS / Linux: source venv/bin/activate
+
+3. Instala las dependencias:
+```bash
+pip install -r requirements.txt
+```
+4. Configura la clave de OpenAI: copia `.env.example` a `.env` y pega tu clave en `OPENAI_API_KEY=`. El archivo `.env` no se sube al repositorio.
+5. Inicia la aplicación y abre `http://127.0.0.1:5000`:
+```bash
+python app.py
 ```
 
-Estas bibliotecas permiten manejar:
-* Flask: Crear el servidor web.
-* PIL y OpenCV: Procesar imágenes.
-* LangChain y OpenAI: Construir el chatbot.
-* dotenv: Cargar variables sensibles desde `.env`.
+**Qué esperar**
+- Subir una imagen devuelve sus colores dominantes en hexadecimal (k=3 por defecto). Esta parte funciona sin clave de OpenAI.
+- El chatbot necesita la clave y usa el modelo `gpt-4`, definido en `app.py`.
 
-#### Configuración del servidor Flask
-```python
-# Inicializamos flask
-app = Flask(__name__)
+**Notas de compatibilidad**
+- Las versiones de `requirements.txt` son de finales de 2024. No se ha probado con Python 3.14.
+- Las importaciones de LangChain cambian entre versiones; por eso las versiones están fijadas.
 
-# Configuramos
-app.config['UPLOAD_FOLDER'] = 'uploads'
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok = True)
-```
+## Evaluación de K-Means: ¿cuántos colores extraer?
 
-Se define la carpeta donde se almacenarán las imágenes subidas (`uploads`). Si no existe, se crea automáticamente.
+La app usa k=3 de forma fija. Para comprobar si ese valor tiene sentido, probé K-Means con k de 2 a 10 sobre seis imágenes de distinto tipo, usando el método del codo (inercia) y el coeficiente de silueta. El análisis está en [`notebooks/Analisis.ipynb`](notebooks/Analisis.ipynb).
 
-#### Configuración de OpenAI
-```python
-# Configuración de OpenAI
-openai.api_key = os.getenv('OPENAI_API_KEY')
-```
+### Método
 
-Se carga la API Key de OpenAI desde el archivo `.env`.
+- **Preprocesamiento:** lectura con OpenCV, conversión a RGB y reducción a 150x150 píxeles (22.500 píxeles por imagen).
+- **Clustering:** `KMeans` de scikit-learn con `random_state=42` y `n_init=10`, para k = 2…10.
+- **Silueta:** `silhouette_score` con `sample_size=1000` (submuestreo para que no sea lento).
+- **Filtrado de fondo (solo en la acuarela):** primero se descartaron los píxeles casi blancos (todos los canales > 235); después, un filtro HSV de papel (saturación < 30 y brillo > 200).
 
----
+### Resultados
 
-### 2. **Variables Globales**
-```python
-extracted_colors = []
-chat_memory = []
-```
+| Imagen | Tipo | k con silueta máxima | Silueta máx. | ¿Codo claro? |
+|---|---|---|---|---|
+| Zorro | Logo, 3 colores planos | 3 | 0.978 | Sí, en k=3 |
+| Starbucks | Logo, 2 colores planos | 2 (k=3 casi empata: 0,947) | 0,949 | Difuso |
+| Acuarela | Ilustración con gradientes | 2 | 0,675 | No |
+| Paisaje | Ilustración vectorial | 2 | 0,674 | No |
+| Supermercado | Fotografía a color | 2 | 0,599 | No |
+| Cascada | Fotografía en blanco y negro | 2 | 0,646 | No |
 
-* `extracted_colors`: Lista para almacenar los colores dominantes extraídos.
-* `chat_memory`: Historial de la conversación con el chatbot.
+### Hallazgos
 
----
+1. **La silueta recupera el número real de colores solo en logos de color plano.** En el zorro, la inercia cae un 86 % de k=2 a k=3 y un 41 % de k=3 a k=4. En Starbucks (verde y blanco) gana k=2, y los clusters extra capturan tonos de transición de los bordes suavizados, no colores de diseño.
+2. **En ilustraciones y fotografías, k=2 gana siempre** y separa zonas claras de oscuras (o fondo de figura). La silueta máxima baja a 0,60-0,68 y el codo no muestra un quiebre claro. Con una semilla distinta en el supermercado, k=2 sigue ganando (0,590).
+3. **Los acentos minoritarios no obtienen un cluster propio.** En la acuarela, los tonos verde-azulados son el 1,5 % de los píxeles (340 de 22.500) y no aparecen en la paleta de k=6. En el supermercado, un azul con el 4 % de los píxeles sí obtuvo un centro propio; con solo dos casos no se puede separar el efecto del área del de la distancia de color.
+4. **Filtrar el fondo mejora la paleta pero no resuelve el punto anterior.** En la acuarela, los dos blancos ocupaban el 67 % de los píxeles de k=6; tras filtrarlos aparecen dos corales distintos, pero los acentos azul-verdosos siguen sin aparecer.
+5. **En escala de grises, K-Means agrupa un solo eje (el brillo).** La paleta son grises puros (R=G=B) y no hay colores que separar. La inercia baja de forma suave, casi como 1/k² entre k=2 y k=4 (hipótesis consistente con una distribución continua de tonos; no se comprobó con el histograma).
 
-### 3. **Rutas del servidor**
+### Limitaciones
 
-#### Ruta principal(`/`)
-```python
-# Ruta de la main page
-@app.route('/')
-def index():
-    return render_template('index.html')
-```
+- **Seis imágenes:** describe lo observado, no es una prueba estadística.
+- **Una sola semilla** en casi todos los casos (solo el supermercado se repitió). Las diferencias de silueta menores de ~0,015 deben tratarse como ruido.
+- Las proporciones (por ejemplo, el 1,5 %) dependen de los umbrales y rangos de tono que elegí.
+- Las siluetas con y sin filtro de fondo **no son comparables** entre sí, porque cambian los datos.
+- Las imágenes proceden de internet y no se incluyen en el repositorio.
 
-Cargará la página principal, que contiene el formulario para subir imágenes y el chatbot.
+### Consecuencias para la app
 
-#### Ruta para Subir y Analizar Imágenes (`/analyze`)
-```python
-# Ruta para procesar imágenes
-@app.route('/analyze', methods = ['POST'])
-def analyze_image():
-    global extracted_colors
-    if 'image' not in request.files:
-        return jsonify({"error": "No se envió ninguna imagen"}), 400
-    
-    file = request.files['image']
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-
-    # Procesamos la imagen
-    extracted_colors = extract_colors(filepath)
-    global chat_memory
-    chat_memory = []
-
-    return jsonify({"colors": extracted_colors})
-```
-
-1. Verifica que se haya enviado una imagen.
-2. Guarda la imagen en el servidor.
-3. Llama a la función `extract_colors` para obtener los colores dominantes.
-4. Devuelve los colores extraídos en formato JSON
-
----
-
-### 4. **Procesamiento de Imágenes**
-
-#### Función para ectraer colores dominantes
-```python
-# Función para extraer colores dominantes
-def extract_colors(image_path, k = 3):
-    image = cv2.imread(image_path)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image = cv2.resize(image, (150, 150))
-    pixels = image.reshape(-1, 3)
-
-    # Clustering con K-Means
-    from sklearn.cluster import KMeans
-    kmeans = KMeans(n_clusters = k)
-    kmeans.fit(pixels)
-    colors = kmeans.cluster_centers_.astype(int)
-
-    # Convertimos a formato HEX
-    hex_colors = ['#%02x%02x%02x' % tuple(color) for color in colors]
-    return hex_colors
-```
-
-#### 1. Lectura y procesamiento:
-
-* Convierte la imagen a formato RGB y reduce su tamaño para optimizar el cálculo.
-
-#### 2. Clustering:
-
-* Usa K-Means para agrupar los píxeles en `k` clusters.
-
-#### 3. Conversión:
-* Convierte los colores RGB de los clusters al formato hexadecimal.
-
----
-
-### 5. **Chatbot con colores**
-
-#### Función `consultas`
-```python
-def consultas(colores, pregunta, memoria=[]):
-    from langchain.embeddings.openai import OpenAIEmbeddings
-    embeddings = OpenAIEmbeddings()
-
-    vectorstore = FAISS.from_texts(
-        [f"Color {i+1}: {color}" for i, color in enumerate(colores)],
-        embeddings
-    )
-
-    retriever = vectorstore.as_retriever(search_type='similarity', search_kwargs={'k': 3})
-
-    llm = ChatOpenAI(model='gpt-4', temperature=0.7)
-
-    contexto = """
-    Eres un diseñador gráfico profesional especializado en análisis y combinación de colores. 
-    Proporciona respuestas detalladas y creativas sobre los colores que se te proporcionen. Habla como un humano experto y
-    no menciones que eres un modelo de inteligencia artificial. Si te preguntan por una preferencia u opinión, basate en principios de diseño y responde.
-    Si te hablan de una imagen, haz de cuenta que te hablan de los colores en tu contexto.
-    """
-    crc = ConversationalRetrievalChain.from_llm(llm, retriever)
-    respuesta = crc({'question': f"{contexto} {pregunta}", 'chat_history': memoria})
-    memoria.append((pregunta, respuesta['answer']))
-
-    return respuesta, memoria
-```
-
-#### 1. Crear Embeddings:
-* Convierte los colores extraídos en representaciones vectoriales
-
-#### 2. Configurar el Chatbot:
-* Usa `LangChain` para crear un chatbot que responde preguntas basadas en los colores proporcionados.
-
-### 3. Historial de Chat:
-* Actualiza la memoria del chat con cada pregunta y respuesta.
-
----
-
-### 6. **Ruta para el Chatbot**
-```python
-# Ruta para el chatbot
-@app.route('/chatbot', methods=['POST'])
-def chatbot():
-    global extracted_colors, chat_memory
-    try:
-        user_message = request.json.get('message')
-        if not user_message:
-            return jsonify({"error": "No se recibió nigún mensaje"}), 400
-        
-        if not extracted_colors:
-            return jsonify({"error": "No hay colores dominantes disponibles. Por favor, analiza una imagen primero."}), 400
-
-        respuesta, chat_memory = consultas(extracted_colors, user_message, chat_memory)
-
-        return jsonify({'reply': respuesta['answer']})
-    except Exception as e:
-        print("Error en OpenAI API:", str(e))
-        return jsonify({'error': str(e)}), 500
-```
-
-1. Recibe un mensaje del usuario.
-2. Verifica si ya se han extraído colores de la imagen subida.
-3. Llama a la función `consultas` para obtener una respuesta basada en los colores extraídos.
-4. Devuelve la respuesta en formato JSON.
-
----
-
-### 7. **Ejecución del Servidor**
-```python
-if __name__ == '__main__':
-    app.run(debug = True)
-```
-
-Inicia la aplicación Flask en modo de depuración.
-
----
-
-## Casos de uso
-
-1. Extraer colores de una imagen:
-* Subir una imagen y recibir los colores dominantes en formato hexadecimal.
-
-2. Asesoramiento de Diseño:
-* Hacer preguntas como:
-  * "¿Cómo combinarías estos colroes en un diseño?"
-  * "¿Cuál es el más adecuado para un logo profesional?"
+- k=3 fijo es razonable en logos de tres colores, pero en una imagen de dos colores la app entrega un color que no existe (un tono de transición), y el chatbot lo trata como parte del diseño.
+- Elegir k automáticamente con la silueta sirve para logos, pero en el resto de imágenes devolvería k=2, que es poco útil como paleta. Para esos casos, k debería fijarse según lo que necesite el usuario (por ejemplo, 4-6).
+- Una imagen en escala de grises solo produce grises; sería útil detectarla y avisar.
